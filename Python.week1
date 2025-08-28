@@ -1,0 +1,211 @@
+# Import required libraries
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+import warnings
+warnings.filterwarnings('ignore')
+
+class WaterDistributionOptimizer:
+    def __init__(self):
+        self.demand_model = None
+        self.optimization_result = None
+        
+    def generate_synthetic_data(self, days=365):
+        """Generate synthetic water demand and supply data"""
+        np.random.seed(42)
+        
+        # Time features
+        dates = pd.date_range(start='2023-01-01', periods=days)
+        day_of_week = dates.dayofweek
+        day_of_year = dates.dayofyear
+        month = dates.month
+        
+        # Synthetic demand factors
+        temperature = 20 + 10 * np.sin(2 * np.pi * day_of_year / 365) + np.random.normal(0, 3, days)
+        rainfall = np.maximum(0, 10 * np.sin(2 * np.pi * (day_of_year - 90) / 365) + np.random.normal(0, 2, days))
+        population_factor = 1.0 + 0.001 * np.arange(days)  # Simulating gradual population growth
+        
+        # Generate water demand
+        base_demand = 50000  # kiloliters
+        demand = (base_demand * 
+                 (1 + 0.3 * np.sin(2 * np.pi * day_of_year / 365)) *  # seasonal variation
+                 (1 + 0.2 * (temperature - 20) / 10) *  # temperature effect
+                 (1 - 0.1 * rainfall / np.max(rainfall)) *  # rainfall effect
+                 population_factor *  # population growth
+                 (1 + 0.1 * (day_of_week >= 5)) +  # weekend effect
+                 np.random.normal(0, 2000, days))  # random noise
+        
+        # Generate supply capacity (reservoirs)
+        supply_capacity = 60000 + 10000 * np.sin(2 * np.pi * (day_of_year + 30) / 365)
+        
+        # Create DataFrame
+        data = pd.DataFrame({
+            'date': dates,
+            'day_of_week': day_of_week,
+            'day_of_year': day_of_year,
+            'month': month,
+            'temperature': temperature,
+            'rainfall': rainfall,
+            'demand': demand,
+            'supply_capacity': supply_capacity
+        })
+        
+        return data
+    
+    def train_demand_model(self, data):
+        """Train ML model to predict water demand"""
+        # Prepare features and target
+        features = ['day_of_week', 'day_of_year', 'month', 'temperature', 'rainfall']
+        X = data[features]
+        y = data['demand']
+        
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        # Train model
+        self.demand_model = RandomForestRegressor(n_estimators=100, random_state=42)
+        self.demand_model.fit(X_train, y_train)
+        
+        # Evaluate model
+        y_pred = self.demand_model.predict(X_test)
+        mse = mean_squared_error(y_test, y_pred)
+        r2 = r2_score(y_test, y_pred)
+        
+        print(f"Model Performance: MSE = {mse:.2f}, R² = {r2:.4f}")
+        
+        return self.demand_model
+    
+    def predict_demand(self, features):
+        """Predict water demand using trained model"""
+        return self.demand_model.predict(features)
+    
+    def optimize_distribution(self, demand_prediction, supply_capacity, cost_params):
+        """Optimize water distribution using constraint optimization"""
+        # Objective function: minimize cost while meeting demand
+        def objective(x):
+            # x[0]: amount from reservoir 1, x[1]: from reservoir 2, etc.
+            treatment_cost = cost_params['treatment'] * np.sum(x)
+            pumping_cost = cost_params['pumping'] * np.sum(x)
+            shortage_penalty = cost_params['shortage'] * max(0, demand_prediction - np.sum(x))
+            return treatment_cost + pumping_cost + shortage_penalty
+        
+        # Constraints: can't exceed supply capacity and must meet demand
+        constraints = (
+            {'type': 'ineq', 'fun': lambda x: supply_capacity - np.sum(x)},  # Total supply <= capacity
+            {'type': 'ineq', 'fun': lambda x: np.sum(x) - demand_prediction}  # Total supply >= demand
+        )
+        
+        # Bounds: each source can provide between 0 and its capacity
+        bounds = [(0, supply_capacity)]  # Simplified for single source
+        
+        # Initial guess
+        x0 = [supply_capacity * 0.8]  # Start at 80% of capacity
+        
+        # Solve optimization problem
+        result = minimize(objective, x0, method='SLSQP', bounds=bounds, constraints=constraints)
+        
+        self.optimization_result = result
+        return result
+    
+    def simulate_optimization(self, days=30):
+        """Run a simulation of the optimization process"""
+        # Generate data
+        data = self.generate_synthetic_data(days=days)
+        
+        # Train model
+        print("Training demand prediction model...")
+        self.train_demand_model(data)
+        
+        # Cost parameters
+        cost_params = {
+            'treatment': 0.5,  # $ per kiloliter
+            'pumping': 0.3,    # $ per kiloliter
+            'shortage': 10.0   # $ per kiloliter of shortage
+        }
+        
+        results = []
+        print("Running optimization simulation...")
+        
+        for i in range(days):
+            # Get features for prediction
+            features = data[['day_of_week', 'day_of_year', 'month', 'temperature', 'rainfall']].iloc[i:i+1]
+            
+            # Predict demand
+            demand_pred = self.predict_demand(features)[0]
+            actual_demand = data['demand'].iloc[i]
+            supply_capacity = data['supply_capacity'].iloc[i]
+            
+            # Optimize distribution
+            opt_result = self.optimize_distribution(demand_pred, supply_capacity, cost_params)
+            optimal_supply = opt_result.x[0]
+            
+            # Calculate actual performance
+            actual_supply = min(optimal_supply, supply_capacity)
+            shortage = max(0, actual_demand - actual_supply)
+            cost = (cost_params['treatment'] * actual_supply + 
+                   cost_params['pumping'] * actual_supply + 
+                   cost_params['shortage'] * shortage)
+            
+            results.append({
+                'day': i,
+                'predicted_demand': demand_pred,
+                'actual_demand': actual_demand,
+                'supply_capacity': supply_capacity,
+                'optimal_supply': optimal_supply,
+                'actual_supply': actual_supply,
+                'shortage': shortage,
+                'cost': cost
+            })
+        
+        return pd.DataFrame(results)
+
+# Main execution
+if __name__ == "__main__":
+    # Initialize optimizer
+    optimizer = WaterDistributionOptimizer()
+    
+    # Run simulation
+    results = optimizer.simulate_optimization(days=30)
+    
+    # Display results
+    print("\nSimulation Results:")
+    print(f"Average daily cost: ${results['cost'].mean():.2f}")
+    print(f"Total shortage: {results['shortage'].sum():.2f} kiloliters")
+    print(f"Days with shortage: {(results['shortage'] > 0).sum()}")
+    
+    # Plot results
+    plt.figure(figsize=(12, 8))
+    
+    plt.subplot(2, 2, 1)
+    plt.plot(results['actual_demand'], label='Actual Demand')
+    plt.plot(results['predicted_demand'], label='Predicted Demand')
+    plt.title('Water Demand Prediction vs Actual')
+    plt.ylabel('Kiloliters')
+    plt.legend()
+    
+    plt.subplot(2, 2, 2)
+    plt.plot(results['supply_capacity'], label='Supply Capacity')
+    plt.plot(results['actual_supply'], label='Actual Supply')
+    plt.title('Water Supply')
+    plt.ylabel('Kiloliters')
+    plt.legend()
+    
+    plt.subplot(2, 2, 3)
+    plt.bar(results['day'], results['shortage'])
+    plt.title('Water Shortage')
+    plt.ylabel('Kiloliters')
+    plt.xlabel('Day')
+    
+    plt.subplot(2, 2, 4)
+    plt.plot(results['cost'])
+    plt.title('Daily Distribution Cost')
+    plt.ylabel('Dollars')
+    plt.xlabel('Day')
+    
+    plt.tight_layout()
+    plt.savefig('water_distribution_optimization.png')
+    plt.show()
