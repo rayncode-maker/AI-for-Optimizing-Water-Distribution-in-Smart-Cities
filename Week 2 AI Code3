@@ -1,0 +1,37 @@
+# 4.1: Handle Missing Values (though our synthetic data has none, this is best practice)
+print(f"Missing values in each column:\n{df.isnull().sum()}")
+
+# 4.2: Feature Engineering (Create new features from existing ones)
+df['month'] = df.index.month
+df['day_of_year'] = df.index.dayofyear
+
+# 4.3: Select Features and Target Variable
+features = ['population', 'temperature_c', 'day_of_week', 'is_weekend', 'is_holiday', 'rainfall_mm', 'month', 'day_of_year']
+X = df[features]
+y = df['water_demand_ML']
+
+# 4.4: Split the Data into Training and Testing Sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False) # Don't shuffle time series data
+print(f"\nTraining set size: {X_train.shape}")
+print(f"Testing set size: {X_test.shape}")
+
+# 4.5: Scale/Normalize the Features
+# Initialize the scaler (StandardScaler for features, often not needed for target)
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Convert back to DataFrames for clarity
+X_train_scaled_df = pd.DataFrame(X_train_scaled, columns=X_train.columns, index=X_train.index)
+X_test_scaled_df = pd.DataFrame(X_test_scaled, columns=X_test.columns, index=X_test.index)
+
+print("\nFeature scaling complete. First 5 rows of scaled training data:")
+print(X_train_scaled_df.head())
+
+# Section 5: Save Processed Datasets
+X_train_scaled_df.to_csv('processed_data/X_train.csv')
+X_test_scaled_df.to_csv('processed_data/X_test.csv')
+y_train.to_csv('processed_data/y_train.csv')
+y_test.to_csv('processed_data/y_test.csv')
+
+print("\nPreprocessed data saved to 'processed_data' folder.")
