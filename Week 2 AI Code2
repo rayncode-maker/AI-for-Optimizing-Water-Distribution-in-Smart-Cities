@@ -1,0 +1,56 @@
+# Set a random seed for reproducibility
+np.random.seed(42)
+
+# Define the date range: e.g., 3 years of daily data
+start_date = datetime(2020, 1, 1)
+end_date = datetime(2022, 12, 31)
+dates = pd.date_range(start=start_date, end=end_date, freq='D')
+
+# Generate synthetic data
+data = {
+    'date': dates,
+    'population': np.random.randint(800000, 1000000, size=len(dates)),  # Simulated city population
+    'temperature_c': np.random.normal(25, 5, len(dates)),  # Daily average temperature
+    'day_of_week': dates.dayofweek,  # Monday=0, Sunday=6
+    'is_weekend': (dates.dayofweek >= 5).astype(int),  # Binary flag for weekend
+    'is_holiday': np.random.choice([0, 1], size=len(dates), p=[0.97, 0.03]),  # Rare holiday events
+    'rainfall_mm': np.random.exponential(2, len(dates)),  # Simulated rainfall (exponential distribution)
+}
+
+# Create the main target variable: water demand in megaliters (ML)
+# Base demand with seasonality (higher in summer) and trend
+base_demand = 400 + 50 * np.sin(2 * np.pi * dates.dayofyear / 365)
+# Add effect of temperature (positive correlation)
+temp_effect = data['temperature_c'] * 0.8
+# Add effect of weekend (people home more, potentially higher usage)
+weekend_effect = data['is_weekend'] * 15
+# Add some random noise
+noise = np.random.normal(0, 10, len(dates))
+
+data['water_demand_ML'] = base_demand + temp_effect + weekend_effect + noise
+
+# Create a DataFrame
+df = pd.DataFrame(data)
+df.set_index('date', inplace=True)
+
+# Display the first 10 rows
+print("Synthetic Data Sample:")
+print(df.head(10))
+
+# Section 3: Basic Exploratory Data Analysis (EDA)
+print("\nDataset Info:")
+print(df.info())
+print("\nDataset Description:")
+print(df.describe())
+
+# Plot the water demand over time
+plt.figure(figsize=(12, 6))
+plt.plot(df.index, df['water_demand_ML'], label='Daily Water Demand', linewidth=1)
+plt.title('Synthetic Urban Water Demand Over Time')
+plt.xlabel('Date')
+plt.ylabel('Demand (Megaliters, ML)')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig('water_demand_timeseries.png') # Save the plot for your README
+plt.show()
